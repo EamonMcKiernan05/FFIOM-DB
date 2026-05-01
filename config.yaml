@@ -1,0 +1,17 @@
+database:
+  path: "data/fantasy_iom.db"
+
+default_season: "2025-26"
+
+api:
+  url: "http://localhost:5000"
+  division_id: 175685803
+
+data_sources:
+  players_file: "/home/eamon/Fantasy-Football-Isle-of-Man/data/real_players.json"
+  stats_file: "/home/eamon/Fantasy-Football-Isle-of-Man/data/player_stats_cache.json"
+
+sync:
+  batch_size: 100
+  retry_count: 3
+  timeout: 30

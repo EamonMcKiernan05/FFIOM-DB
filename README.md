@@ -92,6 +92,22 @@ python scripts/sync_to_game.py --dry-run
 python scripts/sync_to_game.py --clear-players
 ```
 
+## Gameweek Consolidation
+
+Merges gameweeks with 3 or fewer fixtures into adjacent GWs (like real FPL):
+
+```bash
+# Consolidate, recalculate points, regenerate dream teams
+python scripts/consolidate_gameweeks.py
+
+# Or just recalculate after manual changes
+python scripts/recalculate_all.py
+```
+
+Multi-fixture GWs: if a team plays twice in a GW, player points from BOTH fixtures are summed. Captain/triple captain multipliers apply to the combined total.
+
+**Example:** If Peel has 2 fixtures in GW 16 and Thomas Brown scores 2 goals in the first and 3 in the second, he earns the same points as scoring 5 goals. If he's captain, his combined total is doubled.
+
 The sync script:
 - Reads players with season stats from FFIOM-DB
 - Maps team names (e.g. "Peel First" -> "Peel")

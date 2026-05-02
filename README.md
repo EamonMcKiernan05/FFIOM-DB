@@ -77,6 +77,28 @@ python scripts/sync_from_api.py
 - `records_processed` / `records_added` / `records_updated` / `records_deleted`
 - `started_at` / `completed_at` / `status` / `error_message`
 
+## Connecting to the Game
+
+FFIOM-DB is the source of truth. Sync it into the Fantasy Football IOM game:
+
+```bash
+# Sync players from FFIOM-DB into the game database
+python scripts/sync_to_game.py
+
+# Preview without making changes
+python scripts/sync_to_game.py --dry-run
+
+# Clear existing game players first (if needed)
+python scripts/sync_to_game.py --clear-players
+```
+
+The sync script:
+- Reads players with season stats from FFIOM-DB
+- Maps team names (e.g. "Peel First" -> "Peel")
+- Updates existing game players or adds new ones
+- Skips players from teams not in the game (e.g. Combination teams)
+- Preserves game-specific state (fantasy teams, gameweek points, etc.)
+
 ## Data Sources
 
 - **FullTime API**: `http://localhost:5000/api` (Division ID: 175685803)

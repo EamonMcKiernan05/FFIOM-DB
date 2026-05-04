@@ -185,3 +185,171 @@ def get_team_roster(conn, team_name, season="2025-26"):
     )
     columns = [desc[0] for desc in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+# --- Fixture and Gameweek queries ---
+
+
+def get_gameweeks(conn, season="2025-26"):
+    """Get all gameweeks for a season.
+
+    Args:
+        conn: sqlite3 connection
+        season: Season identifier
+
+    Returns:
+        list of dicts
+    """
+    cursor = conn.execute(
+        "SELECT * FROM gameweeks WHERE season = ? ORDER BY number",
+        (season,),
+    )
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def get_fixtures(conn, gameweek_id=None, season="2025-26", played=None):
+    """Get fixtures with optional filters.
+
+    Args:
+        conn: sqlite3 connection
+        gameweek_id: Filter by gameweek ID
+        season: Season identifier
+        played: Filter by played status (True/False)
+
+    Returns:
+        list of dicts
+    """
+    query = "SELECT f.*, g.number as gw_num FROM fixtures f JOIN gameweeks g ON f.gameweek_id = g.id WHERE g.season = ?"
+    params = [season]
+
+    if gameweek_id is not None:
+        query += " AND f.gameweek_id = ?"
+        params.append(gameweek_id)
+    if played is not None:
+        query += " AND f.played = ?"
+        params.append(1 if played else 0)
+
+    query += " ORDER BY f.fixture_date"
+    cursor = conn.execute(query, params)
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def get_team_fixtures(conn, team_name, season="2025-26"):
+    """Get all fixtures for a specific team.
+
+    Args:
+        conn: sqlite3 connection
+        team_name: Team name (e.g., 'Peel', 'Onchan')
+        season: Season identifier
+
+    Returns:
+        list of dicts
+    """
+    # Also check First-suffix versions
+    team_first = f"{team_name} First"
+    query = """
+        SELECT f.*, g.number as gw_num
+        FROM fixtures f
+        JOIN gameweeks g ON f.gameweek_id = g.id
+        WHERE g.season = ?
+          AND (f.home_team_name = ? OR f.home_team_name = ?
+               OR f.away_team_name = ? OR f.away_team_name = ?)
+        ORDER BY f.fixture_date
+    """
+    cursor = conn.execute(query, (season, team_name, team_first, team_name, team_first))
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def get_gameweek_summary(conn, gw_number, season="2025-26"):
+    """Get summary for a gameweek: top scorers, fixture results.
+
+    Args:
+        conn: sqlite3 connection
+        gw_number: Gameweek number
+        season: Season identifier
+
+    Returns:
+        dict with 'gameweek', 'top_scorers', 'fixtures'
+    """
+    gw = conn.execute(
+        "SELECT * FROM gameweeks WHERE number = ? AND season = ?",
+        (gw_number, season),
+    ).fetchone()
+    if not gw:
+        return None
+
+    gw_dict = dict(gw)
+
+    # Top scorers
+    cursor = conn.execute(
+        "SELECT p.name, hs.total_points, hs.goals_scored, hs.clean_sheet, hs.minutes_played "
+        "FROM historical_stats hs JOIN players p ON hs.fa_id = p.fa_id "
+        "WHERE hs.gameweek = ? AND hs.season = ? "
+        "ORDER BY hs.total_points DESC LIMIT 5",
+        (gw_number, season),
+    )
+    cols = [desc[0] for desc in cursor.description]
+    top_scorers = [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    # Fixtures
+    cursor = conn.execute(
+        "SELECT f.* FROM fixtures f WHERE f.gameweek_id = ? ORDER BY f.fixture_date",
+        (gw["id"],),
+    )
+    cols = [desc[0] for desc in cursor.description]
+    fixtures = [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    return {
+        "gameweek": gw_dict,
+        "top_scorers": top_scorers,
+        "fixtures": fixtures,
+    }
+
+
+def get_season_summary(conn, season="2025-26"):
+    """Get season summary stats.
+
+    Args:
+        conn: sqlite3 connection
+        season: Season identifier
+
+    Returns:
+        dict with season summary
+    """
+    player_count = conn.execute(
+        "SELECT COUNT(*) FROM player_seasons WHERE season = ?", (season,)
+    ).fetchone()[0]
+
+    gw_count = conn.execute(
+        "SELECT COUNT(*) FROM gameweeks WHERE season = ?", (season,)
+    ).fetchone()[0]
+
+    fixture_count = conn.execute(
+        "SELECT COUNT(*) FROM fixtures f JOIN gameweeks g ON f.gameweek_id = g.id "
+        "WHERE g.season = ?", (season,)
+    ).fetchone()[0]
+
+    played_count = conn.execute(
+        "SELECT COUNT(*) FROM fixtures f JOIN gameweeks g ON f.gameweek_id = g.id "
+        "WHERE g.season = ? AND f.played = 1", (season,)
+    ).fetchone()[0]
+
+    total_stats = conn.execute(
+        "SELECT COUNT(*) as entries, SUM(total_points) as total_pts, "
+        "AVG(total_points) as avg_pts FROM historical_stats WHERE season = ?",
+        (season,),
+    ).fetchone()
+
+    return {
+        "season": season,
+        "players": player_count,
+        "gameweeks": gw_count,
+        "fixtures_total": fixture_count,
+        "fixtures_played": played_count,
+        "historical_entries": total_stats["entries"],
+        "total_points": total_stats["total_pts"],
+        "avg_points": total_stats["avg_pts"],
+    }

@@ -112,6 +112,61 @@ def create_tables(conn):
         )
     """)
 
+    # Teams table - IOM football teams
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            short_name TEXT,
+            division TEXT DEFAULT 'Premier',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Gameweeks table - rounds of fixtures
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS gameweeks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            number INTEGER NOT NULL,
+            season TEXT NOT NULL DEFAULT '',
+            start_date DATE,
+            end_date DATE,
+            deadline DATETIME,
+            closed BOOLEAN DEFAULT 0,
+            scored BOOLEAN DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(number, season)
+        )
+    """)
+
+    # Fixtures table - individual matches
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fixtures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            gameweek_id INTEGER NOT NULL,
+            fixture_date DATETIME,
+            home_team_id INTEGER,
+            away_team_id INTEGER,
+            home_team_name TEXT NOT NULL DEFAULT '',
+            away_team_name TEXT NOT NULL DEFAULT '',
+            home_score INTEGER,
+            away_score INTEGER,
+            half_time_home INTEGER,
+            half_time_away INTEGER,
+            home_scorers TEXT,
+            away_scorers TEXT,
+            played BOOLEAN DEFAULT 0,
+            competition TEXT,
+            division_name TEXT,
+            home_difficulty INTEGER DEFAULT 3,
+            away_difficulty INTEGER DEFAULT 3,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (gameweek_id) REFERENCES gameweeks(id),
+            FOREIGN KEY (home_team_id) REFERENCES teams(id),
+            FOREIGN KEY (away_team_id) REFERENCES teams(id)
+        )
+    """)
+
     # Sync log table - audit trail
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sync_log (

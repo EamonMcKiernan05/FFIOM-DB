@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
 """Sync historical_stats from FFIOM-DB into Fantasy Football IOM game DB.
 
-This takes the retrospectively-calculated player points from FFIOM-DB
-historical_stats and syncs them as PlayerGameweekPoints records in the
-game database.
-
 Usage:
     python scripts/sync_historical_to_game.py [--season 2025-26] [--clear] [--dry-run]
-
-This is the connection between FFIOM-DB (source of truth) and the game
-backend (SQLAlchemy ORM).
 """
 
 import argparse
 import os
 import sys
 import sqlite3
-from datetime import datetime
 
 # Paths
 FFIOM_DB_PATH = os.path.join(
@@ -27,37 +19,50 @@ FFIOM_DB_PATH = os.path.join(
 GAME_ROOT = os.environ.get(
     "FFIOM_GAME_ROOT", "/home/eamon/Fantasy-Football-Isle-of-Man"
 )
-GAME_DB_PATH = os.path.join(GAME_ROOT, "data", "fantasy_iom.db")
+
+# Team name mapping
+TEAM_NAME_MAP = {
+    "Peel First": "Peel",
+    "Corinthians First": "Corinthians",
+    "Laxey First": "Laxey",
+    "St Marys First": "St Marys",
+    "St Johns United First": "St Johns",
+    "Onchan First": "Onchan",
+    "Ramsey First": "Ramsey",
+    "Rushen United First": "Rushen United",
+    "Union Mills First": "Union Mills",
+    "Ayre United First": "Ayre United",
+    "Braddan First": "Braddan",
+    "Foxdale First": "Foxdale",
+    "DHSOB First": "DHSOB",
+    "Peel": "Peel",
+    "Corinthians": "Corinthians",
+    "Laxey": "Laxey",
+    "St Marys": "St Marys",
+    "St Johns": "St Johns",
+    "Onchan": "Onchan",
+    "Ramsey": "Ramsey",
+    "Rushen United": "Rushen United",
+    "Union Mills": "Union Mills",
+    "Ayre United": "Ayre United",
+    "Braddan": "Braddan",
+    "Foxdale": "Foxdale",
+    "DHSOB": "DHSOB",
+}
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Sync FFIOM-DB historical_stats into game PlayerGameweekPoints"
     )
-    parser.add_argument(
-        "--season", default="2025-26", help="Season to sync (default: 2025-26)"
-    )
-    parser.add_argument(
-        "--gw", type=int, default=None, help="Sync only this gameweek"
-    )
-    parser.add_argument(
-        "--clear",
-        action="store_true",
-        help="Clear existing PlayerGameweekPoints before syncing",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would happen without making changes",
-    )
+    parser.add_argument("--season", default="2025-26")
+    parser.add_argument("--gw", type=int, default=None)
+    parser.add_argument("--clear", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if not os.path.exists(FFIOM_DB_PATH):
         print(f"ERROR: FFIOM-DB not found at {FFIOM_DB_PATH}")
-        sys.exit(1)
-
-    if not os.path.exists(GAME_DB_PATH):
-        print(f"ERROR: Game DB not found at {GAME_DB_PATH}")
         sys.exit(1)
 
     # Load game models
@@ -66,7 +71,7 @@ def main():
     os.environ["DATABASE_URL"] = "sqlite:///./data/fantasy_iom.db"
 
     from app.database import SessionLocal
-    from app.models import Player, Gameweek, PlayerGameweekPoints
+    from app.models import Player, Gameweek, PlayerGameweekPoints, Team
 
     # Open connections
     ffiom = sqlite3.connect(FFIOM_DB_PATH)
@@ -76,7 +81,6 @@ def main():
     # Build player lookup: name -> player_id
     players = game_db.query(Player).all()
     player_by_name = {p.name: p for p in players}
-    # Also build by lowercase for fuzzy matching
     player_by_name_lower = {p.name.lower(): p for p in players}
 
     # Build gameweek lookup: number -> gameweek_id
@@ -85,15 +89,12 @@ def main():
     ).order_by(Gameweek.number).all()
     gw_num_to_id = {gw.number: gw.id for gw in gameweeks}
 
-    # Build FFIOM player lookup: name -> fa_id
-    ffiom_player_rows = ffiom.execute(
-        "SELECT fa_id, name FROM players"
-    ).fetchall()
-    ffiom_name_to_fa = {row["name"]: row["fa_id"] for row in ffiom_player_rows}
+    # Load all teams for lookup
+    game_teams = {t.name: t for t in game_db.query(Team).all()}
 
     # Load historical stats from FFIOM-DB
-    query = f"""
-        SELECT hs.*, p.name as player_name
+    query = """
+        SELECT hs.*, p.name as player_name, p.fa_id
         FROM historical_stats hs
         JOIN players p ON hs.fa_id = p.fa_id
         WHERE hs.season = ?
@@ -108,14 +109,12 @@ def main():
 
     print(f"Season: {args.season}")
     print(f"Gameweeks: {len(gw_num_to_id)} in game DB")
-    print(f"Players: {len(player_by_name)} in game DB, {len(ffiom_name_to_fa)} in FFIOM-DB")
-    print()
+    print(f"Players: {len(player_by_name)} in game DB")
 
     raw_stats = ffiom.execute(query, params).fetchall()
     print(f"Raw historical stats: {len(raw_stats)}")
 
-    # Deduplicate: some players appear in both First and Combination teams
-    # Keep the entry with highest total_points for each (player_name, gameweek)
+    # Deduplicate
     deduped = {}
     for stat in raw_stats:
         key = (stat["player_name"], stat["gameweek"])
@@ -123,7 +122,7 @@ def main():
             deduped[key] = stat
 
     stats = list(deduped.values())
-    print(f"After dedup: {len(stats)} entries ({len(raw_stats) - len(stats)} duplicates removed)")
+    print(f"After dedup: {len(stats)} entries")
 
     if args.clear:
         count = game_db.query(PlayerGameweekPoints).filter(
@@ -137,7 +136,7 @@ def main():
 
     synced = 0
     skipped = 0
-    errors = []
+    added_players = 0
 
     for stat in stats:
         gw_num = stat["gameweek"]
@@ -151,19 +150,50 @@ def main():
         game_player = player_by_name.get(player_name)
         if not game_player:
             game_player = player_by_name_lower.get(player_name.lower())
+
+        # If not found, add the player
         if not game_player:
-            # Try partial match
-            for gn, gp in player_by_name.items():
-                if gn.lower() == player_name.lower():
-                    game_player = gp
+            raw_team = None
+            for s in stats:
+                if s["player_name"] == player_name:
+                    # Get team from player_seasons
+                    row = ffiom.execute(
+                        "SELECT team FROM player_seasons WHERE fa_id = ? AND season = ?",
+                        (s["fa_id"], args.season),
+                    ).fetchone()
+                    if row:
+                        raw_team = row["team"]
                     break
 
-        if not game_player:
-            skipped += 1
-            continue
+            if not raw_team:
+                skipped += 1
+                continue
+
+            normalized_team = TEAM_NAME_MAP.get(raw_team, raw_team.replace(" First", "").strip())
+            game_team = game_teams.get(normalized_team)
+
+            if not game_team:
+                skipped += 1
+                continue
+
+            web_name = player_name.lower().replace(" ", "_").replace("'", "")
+            game_player = Player(
+                name=player_name,
+                web_name=web_name,
+                team_id=game_team.id,
+                position=None,
+                price=5.0,
+                price_start=5.0,
+                is_active=True,
+            )
+            game_db.add(game_player)
+            game_db.flush()
+
+            player_by_name[player_name] = game_player
+            player_by_name_lower[player_name.lower()] = game_player
+            added_players += 1
 
         if not args.dry_run:
-            # Use merge-style upsert: check for existing, update or insert
             existing = game_db.query(PlayerGameweekPoints).filter(
                 PlayerGameweekPoints.player_id == game_player.id,
                 PlayerGameweekPoints.gameweek_id == gw_id,
@@ -209,35 +239,14 @@ def main():
 
             synced += 1
 
-            # Flush periodically to avoid memory issues
             if synced % 500 == 0:
                 game_db.flush()
 
     if not args.dry_run:
         game_db.commit()
-        print(f"\nSync complete: {synced} records synced, {skipped} skipped (player not found)")
+        print(f"\nSync complete: {synced} records, {added_players} new players, {skipped} skipped")
     else:
-        print(f"\n[Dry run] Would sync {synced} records, skip {skipped}")
-
-    # Update player season totals from synced data
-    if not args.dry_run:
-        for gw_id in gw_num_to_id.values():
-            # Aggregate points per player for this GW
-            results = game_db.query(
-                PlayerGameweekPoints.player_id,
-                PlayerGameweekPoints.total_points
-            ).filter(
-                PlayerGameweekPoints.gameweek_id == gw_id
-            ).all()
-
-            for player_id, pts in results:
-                player = game_db.query(Player).get(player_id)
-                if player:
-                    # Add to season totals
-                    player.total_points_season = (player.total_points_season or 0) + pts
-
-        game_db.commit()
-        print("Player season totals updated")
+        print(f"\n[Dry run] Would sync {synced} records, add {added_players} players")
 
     # Stats summary
     for gw_num in sorted(gw_num_to_id.keys()):
